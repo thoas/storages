@@ -3,6 +3,11 @@ package s3
 import (
 	"bytes"
 	"context"
+	"io"
+	"mime"
+	"net/http"
+	"path/filepath"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -10,10 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/pkg/errors"
 	"github.com/ulule/gostorages"
-	"io"
-	"mime"
-	"net/http"
-	"path/filepath"
 )
 
 type CustomAPIHTTPClient interface {
@@ -31,6 +32,7 @@ type Storage struct {
 	bucket   string
 	s3       *s3.Client
 	uploader *manager.Uploader
+	acl      types.ObjectCannedACL
 }
 
 // NewStorage returns a new Storage.
@@ -49,6 +51,10 @@ func NewStorage(cfg Config) (*Storage, error) {
 		}
 	})
 
+	if cfg.ACL == "" {
+		cfg.ACL = types.ObjectCannedACLPublicRead
+	}
+
 	if cfg.UploadConcurrency != nil {
 		uploaderopts = append(uploaderopts, withUploaderConcurrency(*cfg.UploadConcurrency))
 	}
@@ -56,6 +62,7 @@ func NewStorage(cfg Config) (*Storage, error) {
 		bucket:   cfg.Bucket,
 		s3:       client,
 		uploader: manager.NewUploader(client, uploaderopts...),
+		acl:      cfg.ACL,
 	}, nil
 }
 
@@ -66,6 +73,7 @@ type Config struct {
 	Endpoint        string
 	Region          string
 	SecretAccessKey string
+	ACL             types.ObjectCannedACL
 
 	UploadConcurrency *int64
 
@@ -75,10 +83,10 @@ type Config struct {
 // Save saves content to path.
 func (s *Storage) Save(ctx context.Context, content io.Reader, path string) error {
 	input := &s3.PutObjectInput{
-		ACL:    types.ObjectCannedACLPublicRead,
 		Body:   content,
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(path),
+		ACL:    s.acl,
 	}
 
 	contenttype := mime.TypeByExtension(filepath.Ext(path)) // first, detect content type from extension
